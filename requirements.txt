@@ -1,0 +1,6 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+requests==2.32.3
+openai==1.51.0
+firebase-admin==6.5.0
+pydantic==2.9.2
