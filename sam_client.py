@@ -19,8 +19,10 @@ import time
 SAM_ENTITY_URL = "https://api.sam.gov/entity-information/v3/entities"
 
 # Hard safety cap: never ask SAM for more than this many entities in one scrape.
-# (Protects the free 10-requests/day limit.)
-MAX_ENTITIES_PER_SCRAPE = 100
+# Free public keys are limited to 10 records per request until entity
+# registration is approved (then it can go higher). We cap at 10 so a fresh
+# key never hits the "Size Cannot Exceed 10 Records" error.
+MAX_ENTITIES_PER_SCRAPE = 10
 
 
 class SamClient:
@@ -50,6 +52,10 @@ class SamClient:
             "includeSections": "entityRegistration,coreData,assertions,pointsOfContact",
             "page": 0,
             "size": how_many,
+            # US-ONLY: only pull contractors physically located in the United States.
+            # This drops the foreign noise (Poland, Korea, Egypt, etc.) that was
+            # showing up before — GigStacks only wants US industrial workforce.
+            "physicalAddressCountryCode": "USA",
         }
 
         # Filter by trade (NAICS) if provided
