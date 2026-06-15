@@ -27,12 +27,14 @@ from typing import Optional
 from sam_client import SamClient
 from enrichment import Enricher
 from store import Store
+from contact_lookup import ContactLookup
 
 # ---------------------------------------------------------------------------
 # Configuration from environment variables (set these in Render)
 # ---------------------------------------------------------------------------
 SAM_API_KEY = os.environ.get("SAM_API_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+GOOGLE_PLACES_KEY = os.environ.get("GOOGLE_PLACES_KEY", "")
 # A simple shared secret so only YOUR dashboard can trigger scrapes
 SCRAPE_SECRET = os.environ.get("SCRAPE_SECRET", "")
 # Path to the Firebase service account JSON file (we write it from an env var)
@@ -76,6 +78,7 @@ class ScrapeRequest(BaseModel):
     state: Optional[str] = None        # e.g. "TX"
     how_many: int = 25                 # capped at 100 in sam_client
     enrich_with_ai: bool = False       # opt-in (costs OpenAI credits)
+    find_contacts: bool = False        # opt-in (costs Google Places credits)
 
 
 class OutreachRequest(BaseModel):
@@ -101,6 +104,7 @@ def health():
         "status": "ok",
         "sam_key_set": bool(SAM_API_KEY),
         "openai_key_set": bool(OPENAI_API_KEY),
+        "google_key_set": bool(GOOGLE_PLACES_KEY),
     }
 
 
@@ -138,6 +142,18 @@ def scrape(req: ScrapeRequest, x_scrape_secret: Optional[str] = Header(default=N
             if ai_fields.get("ai_enriched"):
                 enriched_count += 1
 
+    # 2b. Optionally find contact info via Google Places (opt-in, costs credits)
+    contacts_found = 0
+    if req.find_contacts:
+        if not GOOGLE_PLACES_KEY:
+            raise HTTPException(status_code=500, detail="GOOGLE_PLACES_KEY not configured.")
+        looker = ContactLookup(GOOGLE_PLACES_KEY)
+        for c in contractors:
+            contact_fields = looker.find_contact(c)
+            c.update(contact_fields)
+            if contact_fields.get("contact_found"):
+                contacts_found += 1
+
     # 3. Save to Firestore with duplicate detection
     store = Store(_setup_firebase_credentials())
     created, updated, skipped = 0, 0, 0
@@ -160,6 +176,7 @@ def scrape(req: ScrapeRequest, x_scrape_secret: Optional[str] = Header(default=N
         "updated": updated,
         "skipped": skipped,
         "ai_enriched": enriched_count,
+        "contacts_found": contacts_found,
     }
     store.log_scrape_run(summary)
 
